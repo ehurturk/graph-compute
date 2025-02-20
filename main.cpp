@@ -1,16 +1,14 @@
+#include <atomic>
+#include <condition_variable>
 #include <functional>
 #include <iostream>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
 using namespace std;
-
-/*
- * TODO:
- *  - Improve terminate
- *  - Do phase analysis / multithreaded execution.
- */
 
 enum TaskType {
     CREATE_PROMPT_TASK,
@@ -33,16 +31,31 @@ class ExecutionEnv {
   private:
     queue<Task *> q;
     vector<Task *> adj_list;
+    vector<vector<Task *>> phases;
 
     vector<Task *> get_entry_points();
 
   public:
     void add_task(Task *t);
-    void execute();
+    void executeBFS();
+    void executeKahn();
+    void executePLS();
+    void printPhases();
     void terminate();
 };
 
 void ExecutionEnv::add_task(Task *t) { adj_list.push_back(t); }
+
+void ExecutionEnv::printPhases() {
+    for (const auto &i : phases) {
+        cout << "[";
+        for (const auto &j : i) {
+            cout << j->name << " ";
+        }
+        cout << "]";
+    }
+    cout << endl;
+}
 
 vector<Task *> ExecutionEnv::get_entry_points() {
     vector<Task *> entry_points;
@@ -53,11 +66,11 @@ vector<Task *> ExecutionEnv::get_entry_points() {
     return entry_points;
 }
 
-void ExecutionEnv::execute() {
-    cout << "[ExecutionEnv]:START EXECUTION" << endl;
-    // 1st approach: BFS
+void ExecutionEnv::executeBFS() {
+    cout << "[ExecutionEnv]:START EXECUTION:[BFS]" << endl;
     vector<Task *> inbounds = get_entry_points();
     unordered_map<string, bool> visited;
+
     Task *t = new Task;
     t->outputs = inbounds;
     t->execute = [] {};
@@ -70,25 +83,33 @@ void ExecutionEnv::execute() {
         Task *ft = q.front();
         ft->execute();
         q.pop();
-
+        vector<Task *> ints = {};
         for (const auto &adj : ft->outputs) {
-            // for every neighbour
             if (!visited[adj->id]) {
                 visited[adj->id] = true;
                 q.push(adj);
+                ints.push_back(adj);
             }
         }
+        if (!ints.empty())
+            phases.push_back(ints);
     }
 
     cout << "[ExecutionEnv]:END EXECUTION" << endl;
     delete t;
 }
 
+void ExecutionEnv::executeKahn() {
+    // Remove inbounds iteratively
+}
+
+void ExecutionEnv::executePLS() {}
+
 void ExecutionEnv::terminate() {
     for (int i = 0; i < adj_list.size(); i++) {
-        delete adj_list[i];
-        adj_list.erase(adj_list.begin() + i);
-        i--; // TODO: Maybe erase this??
+        Task *t = adj_list.back();
+        adj_list.pop_back();
+        delete t;
     }
 }
 
@@ -123,8 +144,8 @@ int main() {
         [] { cout << "Creating node with blah blah..." << endl; }, env.get());
 
     Task *t2 = drag_drop_node(
-        TaskType::PARSE_JSON_TASK, [] { cout << "Parsing json..." << endl; },
-        env.get());
+        TaskType::PARSE_JSON_TASK,
+        [&] { cout << "Parsing json..." << t2->name << endl; }, env.get());
 
     Task *t3 = drag_drop_node(
         TaskType::USE_LLM_TASK, [] { cout << "Using llm..." << endl; },
@@ -144,11 +165,8 @@ int main() {
     connect_task_to(t2, t4);
     connect_task_to(t3, t4);
 
-    // Now, env array is unordered.
-    // We need to create a phasing of the tasks based on their adjacency
-    // list.
-
-    env->execute();
+    env->executeBFS();
+    env->printPhases();
     env->terminate();
 
     return 0;
